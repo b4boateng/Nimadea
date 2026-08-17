@@ -1,0 +1,18 @@
+# Django Media Files (Uploaded documents & images)
+/media/
+media/
+
+# Python / Django standard ignores
+*.pyc
+__pycache__/
+db.sqlite3
+.env
+venv/
+env/
+
+# Next.js build and dependency ignores
+.next/
+node_modules/
+build/
+dist/
+.DS_Store

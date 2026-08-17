@@ -63,3 +63,17 @@ class AIQueryView(APIView):
             "query": query,
             "ai_response": ai_response
         })
+
+
+class DocumentListView(APIView):
+    def get(self, request):
+        docs = Document.objects.all().order_by('-uploaded_at')
+        data = [
+            {
+                "id": doc.id,
+                "title": doc.title,
+                "uploaded_at": doc.uploaded_at.strftime("%Y-%m-%d %H:%M")
+            }
+            for doc in docs
+        ]
+        return Response(data)
