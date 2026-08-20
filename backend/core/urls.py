@@ -6,4 +6,5 @@ urlpatterns = [
     # Add the query endpoint here:
     path('api/query/', AIQueryView.as_view(), name='ai-query'),
     path('api/documents/', DocumentListView.as_view(), name='document-list'),
+    
 ]

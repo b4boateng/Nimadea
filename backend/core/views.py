@@ -1,7 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
-
+from .models import Document
+from .serializers import DocumentSerializer
 from .models import Document, IndexStore
 from .services.loader import extract_text_from_file
 from .services.indexer import build_chunked_index
@@ -65,15 +66,10 @@ class AIQueryView(APIView):
         })
 
 
+
+
 class DocumentListView(APIView):
     def get(self, request):
-        docs = Document.objects.all().order_by('-uploaded_at')
-        data = [
-            {
-                "id": doc.id,
-                "title": doc.title,
-                "uploaded_at": doc.uploaded_at.strftime("%Y-%m-%d %H:%M")
-            }
-            for doc in docs
-        ]
-        return Response(data)
+        documents = Document.objects.all().order_by('-uploaded_at')
+        serializer = DocumentSerializer(documents, many=True)
+        return Response(serializer.data)
