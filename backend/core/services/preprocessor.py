@@ -14,19 +14,18 @@ STOPWORDS = {
 
 def preprocess_text(text):
     """
-    Cleans raw text by lowercasing, stripping punctuation, and removing stopwords.
-    Returns a list of meaningful tokens.
+    Cleans, normalizes, and tokenizes text for the RAG search indexer.
     """
-    # 1. Convert to lowercase
+    if not text:
+        return []
+        
+    # Convert text to lowercase
     text = text.lower()
     
-    # 2. Remove all punctuation using Regex
+    # Remove punctuation using regular expressions
     text = re.sub(r'[^\w\s]', '', text)
     
-    # 3. Tokenize by splitting on spaces
+    # Split the text into a list of words (tokens)
     tokens = text.split()
     
-    # 4. Filter out stopwords
-    cleaned_tokens = [word for word in tokens if word not in STOPWORDS]
-    
-    return cleaned_tokens
+    return tokens

@@ -1,228 +1,315 @@
 "use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import {
+  FolderPlus,
+  Trash2,
+  BookOpen,
+  Clock,
+  ArrowRight,
+  CheckCircle,
+  AlertCircle,
+  X,
+  FileText
+} from "lucide-react";
 
-import { useState, useRef, useEffect } from "react";
-import { UploadCloud, FileText, Send, Trash2, Bot, User, CheckCircle, AlertCircle } from "lucide-react";
-import FileList from '@/components/FileList';
+type Workspace = {
+  id: number;
+  name: string;
+  description: string;
+  target_hours: number;
+  studied_hours: number;
+  documents: { id: number; title: string }[];
+  created_at: string;
+};
 
-type Message = { role: "user" | "ai"; content: string };
-type ToastState = { show: boolean; msg: string; type: "success" | "error" };
+export default function WorkspacesDashboard() {
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [targetHours, setTargetHours] = useState(10);
+  const [toast, setToast] = useState({
+    show: false,
+    msg: "",
+    type: "success" as "success" | "error",
+  });
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "ai", content: "Hello! Upload your study documents and ask me anything about them." }
-  ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [toast, setToast] = useState<ToastState>({ show: false, msg: "", type: "success" });
-  const [isDragging, setIsDragging] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "kb">("chat"); 
-  
-  // A trigger state to force FileList component to refetch when a new file uploads successfully
-  const [refreshKey, setRefreshKey] = useState(0);
+const fetchWorkspaces = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/workspaces/", {
+        headers: {
+          "Accept": "application/json", // Strictly demand JSON
+        },
+      });
+      
+      const contentType = res.headers.get("content-type");
+      if (res.ok && contentType && contentType.includes("application/json")) {
+        const data = await res.json();
+        setWorkspaces(data);
+      } else {
+        showToast("Failed to load notebooks (Invalid server response).", "error");
+        console.error("Expected JSON but received:", contentType);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Network error connecting to backend.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-scroll chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+    fetchWorkspaces();
+  }, []);
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ show: true, msg, type });
-    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+    setTimeout(() => setToast({ show: false, msg: "", type: "success" }), 4000);
   };
 
-  // Handle File Upload to Django Backend
-  const handleFileUpload = async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
 
     try {
-      const res = await fetch("http://localhost:8000/api/upload/", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (res.ok) {
-        showToast(`Successfully indexed "${file.name}"!`, "success");
-        // Trigger the file list sidebar to re-fetch from the database instantly
-        setRefreshKey(prev => prev + 1);
-      } else {
-        const errData = await res.json();
-        showToast(errData.error || "Failed to upload file.", "error");
-      }
-    } catch (error) {
-      console.error("Upload error:", error);
-      showToast("Network error connecting to Django backend.", "error");
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileUpload(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      handleFileUpload(e.target.files[0]);
-    }
-  };
-
-  // Handle Chat Submission to Django AI Query Endpoint
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isTyping) return;
-
-    const userQuery = input;
-    setInput("");
-    setMessages(prev => [...prev, { role: "user", content: userQuery }]);
-    setIsTyping(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/query/", {
+      const res = await fetch("http://localhost:8000/api/workspaces/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: userQuery }),
+        body: JSON.stringify({
+          name: newName,
+          description: newDesc,
+          target_hours: targetHours,
+        }),
       });
 
       if (res.ok) {
-        const data = await res.json();
-        setMessages(prev => [...prev, { role: "ai", content: data.ai_response }]);
+        setNewName("");
+        setNewDesc("");
+        setTargetHours(10);
+        setShowModal(false);
+        await fetchWorkspaces();
+        showToast("Notebook created successfully!", "success");
       } else {
-        setMessages(prev => [...prev, { role: "ai", content: "Error: Failed to retrieve answer from local AI model." }]);
+        showToast("Failed to create notebook.", "error");
       }
-    } catch (error) {
-      console.error("Query error:", error);
-      setMessages(prev => [...prev, { role: "ai", content: "Network error connecting to the AI backend." }]);
-    } finally {
-      setIsTyping(false);
+    } catch (err) {
+      console.error(err);
+      showToast("Network error creating notebook.", "error");
+    }
+  };
+
+  const handleDeleteWorkspace = async (id: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm("Are you sure you want to delete this notebook and all its indexed files?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`http://localhost:8000/api/workspaces/${id}/`, {
+        method: "DELETE",
+      });
+
+      if (res.ok || res.status === 204) {
+        setWorkspaces((prev) => prev.filter((w) => w.id !== id));
+        showToast("Notebook deleted successfully.", "success");
+      } else {
+        showToast("Failed to delete notebook.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Network error deleting notebook.", "error");
     }
   };
 
   return (
-    <main className="flex h-screen bg-appDark text-appText overflow-hidden">
-      
-      {/* Sidebar / Knowledge Base Panel */}
-      <aside className={`w-full md:w-80 bg-appGray border-r border-slate-800 flex flex-col p-4 space-y-4 ${activeTab === 'kb' ? 'flex' : 'hidden md:flex'}`}>
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-brandBlue tracking-wide">Nimadea AI</h1>
-          <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded-md border border-slate-700">RAG + Ollama</span>
-        </div>
-
-        {/* Drag & Drop Upload Zone */}
-        <div 
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center space-y-2 ${
-            isDragging ? 'border-brandBlue bg-brandBlue/10' : 'border-slate-700 hover:border-slate-500 bg-appDark/50'
-          }`}
-        >
-          <UploadCloud size={32} className="text-brandBlue animate-pulse" />
-          <p className="text-xs text-slate-300 font-medium">Drag & drop files here, or <span className="text-brandBlue underline">browse</span></p>
-          <p className="text-[10px] text-slate-500">Supports PDF, TXT, MD</p>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileSelect} 
-            className="hidden" 
-            accept=".pdf,.txt,.md"
-          />
-        </div>
-
-        {/* Live Persistent File Listing Component */}
-        <div className="flex-1 overflow-y-auto">
-          <FileList key={refreshKey} />
-        </div>
-      </aside>
-
-      {/* Main Chat Interface */}
-      <section className={`flex-1 flex flex-col h-full bg-appDark ${activeTab === 'chat' ? 'flex' : 'hidden md:flex'}`}>
-        
-        {/* Mobile Navigation Header */}
-        <div className="md:hidden flex border-b border-slate-800 bg-appGray">
-          <button 
-            onClick={() => setActiveTab('chat')} 
-            className={`flex-1 py-3 text-xs font-semibold text-center ${activeTab === 'chat' ? 'text-brandBlue border-b-2 border-brandBlue' : 'text-slate-400'}`}
+    <main className="min-h-screen bg-appDark text-appText p-6 md:p-12">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10 border-b border-slate-800 pb-6">
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-brandBlue to-aiPurple bg-clip-text text-transparent">
+              Nimadea Study Hub
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">
+              Select or create a subject notebook to manage documents, track hours, and query Ollama.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-aiPurple hover:bg-aiPurple/80 text-white px-5 py-2.5 rounded-xl font-medium transition shadow-lg cursor-pointer"
           >
-            Chat Workspace
-          </button>
-          <button 
-            onClick={() => setActiveTab('kb')} 
-            className={`flex-1 py-3 text-xs font-semibold text-center ${activeTab === 'kb' ? 'text-brandBlue border-b-2 border-brandBlue' : 'text-slate-400'}`}
-          >
-            Knowledge Base
+            <FolderPlus size={20} />
+            <span>New Notebook</span>
           </button>
         </div>
 
-        {/* Chat Message Thread */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-          {messages.map((msg, index) => (
-            <div key={index} className={`flex items-start gap-3 max-w-3xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-brandBlue text-white' : 'bg-aiPurple text-white shadow-lg'}`}>
-                {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
-              </div>
-              <div className={`p-4 rounded-2xl text-sm leading-relaxed shadow-md ${
-                msg.role === 'user' 
-                  ? 'bg-brandBlue text-white rounded-tr-none' 
-                  : 'bg-appGray text-appText border border-slate-700 rounded-tl-none'
-              }`}>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-
-          {isTyping && (
-            <div className="flex items-start gap-3 max-w-3xl mx-auto">
-              <div className="w-8 h-8 rounded-full bg-aiPurple text-white flex items-center justify-center shrink-0 shadow-lg">
-                <Bot size={16} />
-              </div>
-              <div className="bg-appGray text-slate-400 p-4 rounded-2xl rounded-tl-none border border-slate-700 text-sm flex items-center space-x-2">
-                <span className="w-2 h-2 bg-brandBlue rounded-full animate-bounce"></span>
-                <span className="w-2 h-2 bg-brandBlue rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                <span className="w-2 h-2 bg-brandBlue rounded-full animate-bounce [animation-delay:0.4s]"></span>
-              </div>
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        {/* Input Bar Form */}
-        <div className="p-4 md:p-6 bg-appDark border-t border-slate-800">
-          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto relative flex items-center">
-            <input 
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask anything about your uploaded documents..."
-              disabled={isTyping}
-              className="w-full bg-appGray border border-slate-600 rounded-full py-4 pl-6 pr-14 text-sm md:text-base text-appText placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brandBlue focus:border-transparent shadow-lg transition-all"
-            />
-            <button 
-              type="submit"
-              disabled={!input.trim() || isTyping}
-              className="absolute right-2 w-10 h-10 rounded-full bg-aiPurple flex items-center justify-center text-white hover:bg-aiPurple/80 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+        {/* Workspaces Content Grid */}
+        {loading ? (
+          <div className="text-center py-20 text-slate-500 animate-pulse">
+            Loading your study notebooks...
+          </div>
+        ) : workspaces.length === 0 ? (
+          <div className="text-center py-20 bg-appGray/40 border border-slate-800 rounded-2xl p-8">
+            <BookOpen size={48} className="mx-auto text-slate-600 mb-3" />
+            <h3 className="text-lg font-medium text-slate-300">No notebooks created yet</h3>
+            <p className="text-sm text-slate-500 mb-5 max-w-sm mx-auto">
+              Create your first subject folder to start organizing study materials and interacting with the local AI.
+            </p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="bg-brandBlue text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brandBlue/80 transition cursor-pointer"
             >
-              <Send size={18} className="ml-0.5" />
+              Create First Notebook
             </button>
-          </form>
-          <div className="text-center mt-2 hidden md:block">
-            <span className="text-xs text-slate-500">AI can make mistakes. Verify important information from source documents.</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {workspaces.map((ws) => {
+              const progress =
+                ws.target_hours > 0
+                  ? Math.min(Math.round((ws.studied_hours / ws.target_hours) * 100), 100)
+                  : 0;
+
+              return (
+                <Link
+                  key={ws.id}
+                  href={`/workspaces/${ws.id}`}
+                  className="bg-appGray border border-slate-700/60 rounded-2xl p-6 hover:border-brandBlue transition-all shadow-xl flex flex-col justify-between group relative cursor-pointer"
+                >
+                  <div>
+                    <div className="flex justify-between items-start gap-2 mb-3">
+                      <h3 className="text-xl font-semibold text-slate-100 group-hover:text-brandBlue transition truncate">
+                        {ws.name}
+                      </h3>
+                      <button
+                        onClick={(e) => handleDeleteWorkspace(ws.id, e)}
+                        className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                        title="Delete Notebook"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-400 line-clamp-2 mb-6">
+                      {ws.description || "No notebook description provided."}
+                    </p>
+                  </div>
+
+                  <div>
+                    {/* Hours Progress Bar */}
+                    <div className="mb-4">
+                      <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                        <span className="flex items-center gap-1">
+                          <Clock size={13} className="text-brandBlue" /> Studied: {ws.studied_hours}h / {ws.target_hours}h
+                        </span>
+                        <span className="font-semibold text-slate-300">{progress}%</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-successGreen h-full transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-700/50 text-xs text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <FileText size={14} className="text-aiPurple" />
+                        {ws.documents?.length || 0} files indexed
+                      </span>
+                      <span className="flex items-center gap-1 text-brandBlue font-medium group-hover:translate-x-1 transition-transform">
+                        Open Notebook <ArrowRight size={14} />
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Create Workspace Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-appGray border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+            <button
+              onClick={() => setShowModal(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-white"
+            >
+              <X size={18} />
+            </button>
+            <h2 className="text-xl font-bold mb-4 text-slate-100">Create Subject Notebook</h2>
+            <form onSubmit={handleCreateWorkspace} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Notebook / Subject Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Distributed Systems"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-brandBlue"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Description (Optional)
+                </label>
+                <textarea
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  placeholder="Topics, lecture notes, syllabus..."
+                  rows={3}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-brandBlue"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Target Study Hours
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={targetHours}
+                  onChange={(e) => setTargetHours(Number(e.target.value))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-brandBlue"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl text-sm font-medium bg-aiPurple text-white hover:bg-aiPurple/80 transition cursor-pointer"
+                >
+                  Create Notebook
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </section>
+      )}
 
-      {/* Global Toast Notification */}
-      <div className={`fixed bottom-24 md:bottom-8 right-4 md:right-8 transform transition-transform duration-300 ${toast.show ? "translate-y-0" : "translate-y-[150%]"} ${toast.type === "success" ? "bg-successGreen" : "bg-red-500"} text-white py-3 px-5 rounded-xl shadow-2xl flex items-center gap-3 z-50`}>
+      {/* Global Toast */}
+      <div
+        className={`fixed bottom-8 right-8 transform transition-transform duration-300 ${
+          toast.show ? "translate-y-0" : "translate-y-[150%]"
+        } ${toast.type === "success" ? "bg-successGreen" : "bg-red-500"} text-white py-3 px-5 rounded-xl shadow-2xl flex items-center gap-3 z-50`}
+      >
         {toast.type === "success" ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
         <span className="text-sm font-medium">{toast.msg}</span>
       </div>
-
     </main>
   );
 }
