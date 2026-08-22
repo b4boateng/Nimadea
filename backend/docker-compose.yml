@@ -1,13 +1,13 @@
-version: '3.8'
-
 services:
   backend:
     build: .
     ports:
       - "8000:8000"
     volumes:
-      # This syncs your local files to the container so you don't 
-      # have to rebuild the image every time you edit your Python code. [cite: 48]
       - .:/app
-    command: >
-      sh -c "python manage.py runserver 0.0.0.0:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_HOST=http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python manage.py runserver 0.0.0.0:8000
