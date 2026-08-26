@@ -47,6 +47,10 @@ export default function WorkspaceChatPage({ params }: { params: Promise<{ id: st
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  
+  // NEW: State to track which AI model the user wants to use
+  const [mode, setMode] = useState<"fast" | "power">("fast");
+  
   const [selectedDocIds, setSelectedDocIds] = useState<number[]>([]);
   const [uploading, setUploading] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -196,12 +200,13 @@ export default function WorkspaceChatPage({ params }: { params: Promise<{ id: st
         body: JSON.stringify({
           query: userQuery,
           document_ids: selectedDocIds,
+          mode: mode // NEW: Pass the selected mode to Django
         }),
       });
 
       const contentType = res.headers.get("content-type");
       
-      // FIX: Only call res.json() once, safely nested inside the content-type check.
+      // Safe parsing
       if (contentType && contentType.includes("application/json")) {
         const data = await res.json();
         
@@ -450,6 +455,28 @@ export default function WorkspaceChatPage({ params }: { params: Promise<{ id: st
 
         {/* Query Input Footer */}
         <div className="p-4 md:p-6 border-t border-slate-800 bg-appDark">
+          
+          {/* NEW: Model Selection Toggle */}
+          <div className="flex items-center gap-2 mb-3 max-w-4xl mx-auto md:px-0">
+            <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">AI Mode:</span>
+            <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => setMode("fast")}
+                className={`px-3 py-1 text-xs rounded-md transition-colors cursor-pointer ${mode === "fast" ? "bg-brandBlue text-white" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                Fast (Flash)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("power")}
+                className={`px-3 py-1 text-xs rounded-md transition-colors cursor-pointer ${mode === "power" ? "bg-aiPurple text-white" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                Power (Pro)
+              </button>
+            </div>
+          </div>
+
           <form onSubmit={handleSendMessage} className="relative flex items-center max-w-4xl mx-auto">
             <input
               type="text"
