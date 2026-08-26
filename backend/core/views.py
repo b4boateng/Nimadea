@@ -6,7 +6,8 @@ from .models import Workspace, Document, IndexStore
 from .serializers import WorkspaceSerializer, DocumentSerializer
 from core.services.loader import extract_text_from_file
 from core.services.indexer import build_chunked_index
-from core.services.ranker import search_chunks_and_query_ollama
+from core.services.ranker import rank_chunks
+from core.services.ai_service import query_hosted_llm
 
 class WorkspaceListView(APIView):
     def get(self, request):
@@ -127,11 +128,13 @@ class DocumentDeleteView(APIView):
             return Response({"message": "Document deleted."}, status=status.HTTP_204_NO_CONTENT)
         except Document.DoesNotExist:
             return Response({"error": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
-
 class AIQueryView(APIView):
     def post(self, request):
         query = request.data.get('query')
         selected_doc_ids = request.data.get('document_ids', [])
+        
+        # Allows the frontend to specify a fast or complex task model
+        mode = request.data.get('mode', 'fast') 
 
         if not query:
             return Response({"error": "No query provided."}, status=status.HTTP_400_BAD_REQUEST)
@@ -145,7 +148,28 @@ class AIQueryView(APIView):
         doc_dict = {str(d.id): d.extracted_text for d in docs}
 
         if not doc_dict:
-            return Response({"ai_response": "Please upload and select at least one document to chat with."}, status=status.HTTP_200_OK)
+            return Response(
+                {"ai_response": "Please upload and select at least one document to chat with."}, 
+                status=status.HTTP_200_OK
+            )
 
-        ai_response = search_chunks_and_query_ollama(query, doc_dict)
-        return Response({"query": query, "ai_response": ai_response})
+        # 1. Build a dynamic index strictly scoped to the active documents
+        inverted_index, chunk_mapping = build_chunked_index(doc_dict)
+        
+        # 2. Rank and extract the top text chunks as strings
+        top_chunks = rank_chunks(query, inverted_index, chunk_mapping)
+        
+        # 3. Combine the chunks into a single context string
+        if not top_chunks:
+            # Fallback to the beginning of the documents if no specific match is found
+            context = "\n---\n".join(list(doc_dict.values())[:2])[:2500]
+        else:
+            context = "\n---\n".join(top_chunks)
+
+        # 4. Query the hosted Gemini LLM
+        ai_response = query_hosted_llm(query, context, mode=mode)
+        
+        return Response({
+            "query": query, 
+            "ai_response": ai_response
+        })

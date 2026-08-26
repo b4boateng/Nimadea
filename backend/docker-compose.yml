@@ -10,4 +10,11 @@ services:
       - OLLAMA_HOST=http://host.docker.internal:11434/api/generate
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    dns:
+      - 8.8.8.8   # Google Primary DNS
+      - 8.8.4.4   # Google Secondary DNS
+      - 1.1.1.1   #Cloudflare
+      - 1.0.0.1
     command: python manage.py runserver 0.0.0.0:8000
