@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   FolderPlus,
@@ -36,7 +36,12 @@ export default function WorkspacesDashboard() {
     type: "success" as "success" | "error",
   });
 
-const fetchWorkspaces = async () => {
+  const showToast = useCallback((msg: string, type: "success" | "error") => {
+    setToast({ show: true, msg, type });
+    setTimeout(() => setToast({ show: false, msg: "", type: "success" }), 4000);
+  }, []);
+
+  const fetchWorkspaces = useCallback(async () => {
     try {
       const res = await fetch("http://localhost:8000/api/workspaces/", {
         headers: {
@@ -58,16 +63,13 @@ const fetchWorkspaces = async () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
 
   useEffect(() => {
+    // The request updates state after the external fetch resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchWorkspaces();
-  }, []);
-
-  const showToast = (msg: string, type: "success" | "error") => {
-    setToast({ show: true, msg, type });
-    setTimeout(() => setToast({ show: false, msg: "", type: "success" }), 4000);
-  };
+  }, [fetchWorkspaces]);
 
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();

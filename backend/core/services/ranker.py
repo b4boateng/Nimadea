@@ -1,13 +1,25 @@
+import math
 import os
 import requests
+from django.db.models import Q
+
+from core.models import DocumentChunk
 from core.services.preprocessor import preprocess_text
-from core.services.indexer import build_chunked_index
+from core.services.indexer import build_chunked_index, build_embedding_from_text
+
+
+def cosine_similarity(vec_a, vec_b):
+    if not vec_a or not vec_b:
+        return 0.0
+
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a)) or 1.0
+    norm_b = math.sqrt(sum(b * b for b in vec_b)) or 1.0
+    return dot / (norm_a * norm_b)
 
 
 def rank_chunks(query, inverted_index, chunk_mapping):
-    """
-    Ranks text chunks based on matching keyword frequencies.
-    """
+    """Legacy keyword-only ranking kept for compatibility."""
     tokens = preprocess_text(query)
     scores = {}
 
@@ -17,19 +29,87 @@ def rank_chunks(query, inverted_index, chunk_mapping):
                 scores[chunk_id] = scores.get(chunk_id, 0) + freq
 
     ranked_chunk_ids = sorted(scores, key=scores.get, reverse=True)
-    
-    # --- FIX: Extract the actual text string from the dictionary ---
+
     top_chunks = []
     for c_id in ranked_chunk_ids:
         if c_id in chunk_mapping:
             chunk_data = chunk_mapping[c_id]
-            # Safely handle both dict formats and raw strings
             if isinstance(chunk_data, dict) and "text" in chunk_data:
                 top_chunks.append(chunk_data["text"])
             elif isinstance(chunk_data, str):
                 top_chunks.append(chunk_data)
-                
-    return top_chunks[:5]  # Return top 5 most relevant strings
+
+    return top_chunks[:5]
+
+
+def hybrid_retrieve_chunks(query, workspace_id=None, document_ids=None, limit=5):
+    """Hybrid retrieval combining lexical scoring and vector similarity."""
+    query_tokens = set(preprocess_text(query))
+    query_vector = build_embedding_from_text(query)
+
+    filters = Q()
+    if workspace_id is not None:
+        filters &= Q(workspace_id=workspace_id)
+    if document_ids:
+        filters &= Q(document_id__in=document_ids)
+
+    chunks = DocumentChunk.objects.filter(filters).order_by('document_id', 'chunk_index')
+
+    scored = []
+    for chunk in chunks:
+        token_score = 0.0
+        for token in query_tokens:
+            if token in " ".join(preprocess_text(chunk.content)).lower():
+                token_score += 1.0
+
+        vector_score = cosine_similarity(query_vector, chunk.embedding or [0.0] * len(query_vector))
+        combined = (token_score * 0.4) + (vector_score * 0.6)
+        if combined <= 0 and not query_tokens:
+            combined = 0.0
+
+        scored.append({
+            'chunk_id': chunk.id,
+            'workspace_id': chunk.workspace_id,
+            'document_id': chunk.document_id,
+            'content': chunk.content,
+            'section': chunk.section,
+            'subsection': chunk.subsection,
+            'page_number': chunk.page_number,
+            'embedding': chunk.embedding,
+            'score': combined,
+            'keyword_score': token_score,
+            'vector_score': vector_score,
+        })
+
+    scored.sort(key=lambda item: item['score'], reverse=True)
+    return scored[:limit]
+
+
+def build_context_from_candidates(candidates):
+    """Build the final retrieval context and source metadata for the AI."""
+    context_lines = []
+    sources = []
+
+    for item in candidates:
+        content = (item.get('content') or '').strip()
+        if not content:
+            continue
+
+        context_lines.append(content)
+        sources.append({
+            'chunk_id': item.get('chunk_id'),
+            'document_id': item.get('document_id'),
+            'workspace_id': item.get('workspace_id'),
+            'section': item.get('section'),
+            'subsection': item.get('subsection'),
+            'page_number': item.get('page_number'),
+            'score': item.get('score'),
+        })
+
+    return {
+        'context': '\n---\n'.join(context_lines),
+        'sources': sources,
+    }
 
 def query_ollama(prompt, context):
     ollama_url = os.environ.get("OLLAMA_API_URL", "http://host.docker.internal:11434/api/chat")

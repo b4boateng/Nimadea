@@ -2,6 +2,7 @@
 
 import {
   use,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -41,6 +42,15 @@ import StudyTimer from "@/components/StudyTimer";
 type Message = {
   role: "user" | "ai";
   content: string;
+  sources?: SourceType[];
+};
+
+type SourceType = {
+  document_id: number;
+  section?: string;
+  subsection?: string;
+  page_number?: number | null;
+  score?: number;
 };
 
 type DocumentType = {
@@ -192,7 +202,7 @@ export default function WorkspaceChatPage({
      TOAST
   ======================================================= */
 
-  const showToast = (
+  const showToast = useCallback((
     msg: string,
     type: "success" | "error"
   ) => {
@@ -209,13 +219,13 @@ export default function WorkspaceChatPage({
         type: "success",
       });
     }, 4000);
-  };
+  }, []);
 
   /* =======================================================
      FETCH WORKSPACE
   ======================================================= */
 
-  const fetchWorkspace = async () => {
+  const fetchWorkspace = useCallback(async () => {
     try {
       const res = await fetch(
         `http://localhost:8000/api/workspaces/${workspaceId}/`,
@@ -293,15 +303,16 @@ export default function WorkspaceChatPage({
     } finally {
       setLoadingWorkspace(false);
     }
-  };
+  }, [showToast, workspaceId]);
 
   /* =======================================================
      INITIAL WORKSPACE LOAD
   ======================================================= */
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchWorkspace();
-  }, [workspaceId]);
+  }, [fetchWorkspace]);
 
   /* =======================================================
      AUTO-SCROLL CHAT
@@ -539,6 +550,8 @@ export default function WorkspaceChatPage({
             query: userQuery,
             document_ids:
               selectedDocIds,
+            workspace_id:
+              Number(workspaceId),
             mode,
           }),
         }
@@ -566,6 +579,7 @@ export default function WorkspaceChatPage({
                 content:
                   data.ai_response ||
                   "The AI returned an empty response.",
+                sources: data.sources || [],
               },
             ]
           );
@@ -1065,11 +1079,25 @@ export default function WorkspaceChatPage({
 
                     ) : (
 
-                      <AIResponse
-                        content={
-                          message.content
-                        }
-                      />
+                      <>
+                        <AIResponse content={message.content} />
+                        {message.sources && message.sources.length > 0 && (
+                          <div className="mt-4 border-t border-slate-600/60 pt-3 text-xs text-slate-400">
+                            <p className="mb-2 font-semibold uppercase tracking-wide text-slate-500">
+                              Sources
+                            </p>
+                            <ul className="space-y-1">
+                              {message.sources.map((source, sourceIndex) => (
+                                <li key={`${source.document_id}-${sourceIndex}`}>
+                                  Document {source.document_id}
+                                  {source.section ? ` - ${source.section}` : ""}
+                                  {source.page_number ? `, page ${source.page_number}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
 
                     )}
 

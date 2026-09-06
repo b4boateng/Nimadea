@@ -1,6 +1,6 @@
 from django.db import models
 
-# 1. Define Workspace FIRST
+
 class Workspace(models.Model):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, null=True)
@@ -12,17 +12,16 @@ class Workspace(models.Model):
         return self.name
 
 
-# 2. Define Document SECOND
 class Document(models.Model):
     workspace = models.ForeignKey(
-        Workspace, 
-        on_delete=models.CASCADE, 
-        related_name='documents', 
-        null=True, 
-        blank=True
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name='documents',
+        null=True,
+        blank=True,
     )
     title = models.CharField(max_length=255)
-    file = models.FileField(upload_to='documents/')
+    file = models.FileField(upload_to='documents/', blank=True, null=True)
     extracted_text = models.TextField(blank=True, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -30,7 +29,38 @@ class Document(models.Model):
         return self.title
 
 
-# 3. IndexStore
+class DocumentChunk(models.Model):
+    workspace = models.ForeignKey(
+        Workspace,
+        on_delete=models.CASCADE,
+        related_name='chunks',
+    )
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name='chunks',
+    )
+    content = models.TextField()
+    chunk_index = models.PositiveIntegerField(default=0)
+    section = models.CharField(max_length=255, blank=True, default='')
+    subsection = models.CharField(max_length=255, blank=True, default='')
+    page_number = models.PositiveIntegerField(blank=True, null=True)
+    embedding = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workspace', 'document', 'chunk_index'],
+                name='unique_document_chunk_index',
+            )
+        ]
+        ordering = ['document_id', 'chunk_index']
+
+    def __str__(self):
+        return f"{self.document.title} chunk {self.chunk_index}"
+
+
 class IndexStore(models.Model):
     inverted_index = models.JSONField(default=dict)
     chunk_mapping = models.JSONField(default=dict)

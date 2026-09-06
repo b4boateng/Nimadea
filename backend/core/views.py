@@ -5,8 +5,8 @@ from rest_framework import status
 from .models import Workspace, Document, IndexStore
 from .serializers import WorkspaceSerializer, DocumentSerializer
 from core.services.loader import extract_text_from_file
-from core.services.indexer import build_chunked_index
-from core.services.ranker import rank_chunks
+from core.services.indexer import build_chunked_index, build_document_chunks_for_workspace
+from core.services.ranker import build_context_from_candidates, hybrid_retrieve_chunks
 from core.services.ai_service import query_hosted_llm
 
 class WorkspaceListView(APIView):
@@ -92,6 +92,9 @@ class DocumentUploadView(APIView):
         doc.extracted_text = extract_text_from_file(doc.file.path)
         doc.save()
 
+        if doc.workspace_id:
+            build_document_chunks_for_workspace(doc.workspace_id)
+
         # Re-index all active documents
         all_docs = Document.objects.all()
         doc_dict = {str(d.id): d.extracted_text for d in all_docs}
@@ -132,44 +135,68 @@ class AIQueryView(APIView):
     def post(self, request):
         query = request.data.get('query')
         selected_doc_ids = request.data.get('document_ids', [])
-        
-        # Allows the frontend to specify a fast or complex task model
-        mode = request.data.get('mode', 'fast') 
+        workspace_id = request.data.get('workspace_id')
+
+        mode = request.data.get('mode', 'fast')
 
         if not query:
             return Response({"error": "No query provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Filter strictly to the chosen files
+        docs = Document.objects.all()
+        if workspace_id:
+            try:
+                workspace = Workspace.objects.get(pk=workspace_id)
+            except Workspace.DoesNotExist:
+                return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
+            docs = docs.filter(workspace=workspace)
+
         if selected_doc_ids:
-            docs = Document.objects.filter(id__in=selected_doc_ids)
-        else:
-            docs = Document.objects.all()
+            try:
+                selected_doc_ids = [int(doc_id) for doc_id in selected_doc_ids]
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "document_ids must contain only valid document IDs."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            scoped_docs = docs.filter(id__in=selected_doc_ids)
+            if scoped_docs.count() != len(set(selected_doc_ids)):
+                return Response(
+                    {"error": "One or more selected documents are outside this workspace."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            docs = scoped_docs
 
         doc_dict = {str(d.id): d.extracted_text for d in docs}
 
         if not doc_dict:
             return Response(
-                {"ai_response": "Please upload and select at least one document to chat with."}, 
-                status=status.HTTP_200_OK
+                {"ai_response": "Please upload and select at least one document to chat with."},
+                status=status.HTTP_200_OK,
             )
 
-        # 1. Build a dynamic index strictly scoped to the active documents
-        inverted_index, chunk_mapping = build_chunked_index(doc_dict)
-        
-        # 2. Rank and extract the top text chunks as strings
-        top_chunks = rank_chunks(query, inverted_index, chunk_mapping)
-        
-        # 3. Combine the chunks into a single context string
-        if not top_chunks:
-            # Fallback to the beginning of the documents if no specific match is found
-            context = "\n---\n".join(list(doc_dict.values())[:2])[:2500]
-        else:
-            context = "\n---\n".join(top_chunks)
+        if workspace_id:
+            build_document_chunks_for_workspace(workspace_id)
 
-        # 4. Query the hosted Gemini LLM
+        candidates = hybrid_retrieve_chunks(
+            query=query,
+            workspace_id=workspace_id,
+            document_ids=selected_doc_ids or None,
+            limit=5,
+        )
+
+        if candidates:
+            retrieval_context = build_context_from_candidates(candidates)
+            context = retrieval_context['context']
+            source_metadata = retrieval_context['sources']
+        else:
+            context = "\n---\n".join(list(doc_dict.values())[:2])[:2500]
+            source_metadata = []
+
         ai_response = query_hosted_llm(query, context, mode=mode)
-        
+
         return Response({
-            "query": query, 
-            "ai_response": ai_response
+            "query": query,
+            "ai_response": ai_response,
+            "sources": source_metadata,
         })
