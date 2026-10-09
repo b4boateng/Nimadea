@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
+from django.contrib.auth.models import User
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from core.models import Document, DocumentChunk, Workspace
 from core.services.ai_service import generate_embedding
@@ -141,3 +143,93 @@ class RAGScopeTests(TestCase):
         self.assertEqual(chunks.first().content, document.extracted_text)
         self.assertEqual(chunks.first().embedding, [0.4, 0.5, 0.6])
         self.assertTrue(mock_embedding.called)
+
+
+class AuthenticationAuthorizationTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(username="alice", password="strong-password-1")
+        self.user_b = User.objects.create_user(username="bob", password="strong-password-2")
+        self.workspace_a = Workspace.objects.create(name="Alice Workspace", owner=self.user_a)
+        self.workspace_b = Workspace.objects.create(name="Bob Workspace", owner=self.user_b)
+        self.document_a = Document.objects.create(
+            workspace=self.workspace_a,
+            owner=self.user_a,
+            title="Alice Notes",
+            extracted_text="Private Alice material.",
+        )
+        self.document_b = Document.objects.create(
+            workspace=self.workspace_b,
+            owner=self.user_b,
+            title="Bob Notes",
+            extracted_text="Private Bob material.",
+        )
+        self.client = APIClient()
+
+    def test_registration_creates_auth_token_profile_and_settings(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "new-user",
+                "email": "new@example.com",
+                "password": "strong-password-3",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created_user = User.objects.get(username="new-user")
+        self.assertTrue(created_user.check_password("strong-password-3"))
+        self.assertTrue(hasattr(created_user, "profile"))
+        self.assertTrue(hasattr(created_user, "settings"))
+        self.assertTrue(response.data["token"])
+
+        login = self.client.post(
+            "/api/auth/login/",
+            {"username": "new-user", "password": "strong-password-3"},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.data["token"])
+
+    def test_unauthenticated_requests_are_rejected(self):
+        response = self.client.get("/api/workspaces/")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_workspace_listing_and_detail_are_owner_scoped(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        listing = self.client.get("/api/workspaces/")
+        detail = self.client.get(f"/api/workspaces/{self.workspace_b.id}/")
+
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([item["id"] for item in listing.data], [self.workspace_a.id])
+        self.assertEqual(detail.status_code, 404)
+
+    def test_document_download_and_delete_reject_another_users_document(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        download = self.client.get(f"/api/documents/{self.document_b.id}/download/")
+        delete = self.client.delete(f"/api/documents/{self.document_b.id}/")
+
+        self.assertEqual(download.status_code, 404)
+        self.assertEqual(delete.status_code, 404)
+        self.assertTrue(Document.objects.filter(pk=self.document_b.id).exists())
+
+    def test_rag_rejects_cross_user_workspace_and_document_ids(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        foreign_workspace = self.client.post(
+            "/api/ai-query/",
+            {"workspace_id": self.workspace_b.id, "document_ids": [self.document_b.id], "query": "private"},
+            format="json",
+        )
+        foreign_document = self.client.post(
+            "/api/ai-query/",
+            {"workspace_id": self.workspace_a.id, "document_ids": [self.document_b.id], "query": "private"},
+            format="json",
+        )
+
+        self.assertEqual(foreign_workspace.status_code, 404)
+        self.assertEqual(foreign_document.status_code, 400)

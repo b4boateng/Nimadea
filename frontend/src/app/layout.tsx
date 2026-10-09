@@ -40,6 +40,12 @@ export default function RootLayout({
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              href="/auth"
+              className="text-xs font-medium text-slate-300 hover:text-white"
+            >
+              Sign in
+            </Link>
             <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900 border border-slate-700/80 px-3 py-1.5 rounded-full">
               <Sparkles size={13} className="text-aiPurple animate-pulse" />
               <span>Local Ollama</span>

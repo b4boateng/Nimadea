@@ -1,9 +1,69 @@
 import os
+from django.contrib.auth import authenticate
+from django.http import FileResponse
+from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Workspace, Document, IndexStore
-from .serializers import WorkspaceSerializer, DocumentSerializer
+from .models import Workspace, Document, IndexStore, UserProfile, UserSettings
+from .serializers import (
+    WorkspaceSerializer,
+    DocumentSerializer,
+    ProfileSerializer,
+    RegistrationSerializer,
+    SettingsSerializer,
+)
+
+
+def owned_workspace(request, workspace_id):
+    return Workspace.objects.filter(pk=workspace_id, owner=request.user).first()
+
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response(
+            {'token': token.key, 'user': {'id': user.id, 'username': user.username, 'email': user.email}},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProfileView(APIView):
+    def get(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        return Response({
+            'id': request.user.id,
+            'username': request.user.username,
+            'email': request.user.email,
+            'profile': ProfileSerializer(profile).data,
+        })
+
+    def patch(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        serializer = ProfileSerializer(profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class SettingsView(APIView):
+    def get(self, request):
+        settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        return Response(SettingsSerializer(settings).data)
+
+    def patch(self, request):
+        settings, _ = UserSettings.objects.get_or_create(user=request.user)
+        serializer = SettingsSerializer(settings, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 from core.services.loader import extract_text_from_file
 from core.services.indexer import build_chunked_index, build_document_chunks_for_workspace
 from core.services.ranker import build_context_from_candidates, hybrid_retrieve_chunks
@@ -11,21 +71,21 @@ from core.services.ai_service import query_hosted_llm
 
 class WorkspaceListView(APIView):
     def get(self, request):
-        workspaces = Workspace.objects.all().order_by('-created_at')
+        workspaces = Workspace.objects.filter(owner=request.user).order_by('-created_at')
         serializer = WorkspaceSerializer(workspaces, many=True)
         return Response(serializer.data)
 
     def post(self, request):
         serializer = WorkspaceSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(owner=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class WorkspaceDetailView(APIView):
     def get(self, request, pk):
         try:
-            workspace = Workspace.objects.get(pk=pk)
+            workspace = Workspace.objects.get(pk=pk, owner=request.user)
             return Response(WorkspaceSerializer(workspace).data)
         except Workspace.DoesNotExist:
             return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -33,7 +93,7 @@ class WorkspaceDetailView(APIView):
     def patch(self, request, pk):
         """Update studied hours or target hours"""
         try:
-            workspace = Workspace.objects.get(pk=pk)
+            workspace = Workspace.objects.get(pk=pk, owner=request.user)
             additional_hours = request.data.get('studied_hours_add', 0)
             if additional_hours:
                 workspace.studied_hours = round(workspace.studied_hours + float(additional_hours), 2)
@@ -44,7 +104,7 @@ class WorkspaceDetailView(APIView):
 
     def delete(self, request, pk):
         try:
-            workspace = Workspace.objects.get(pk=pk)
+            workspace = Workspace.objects.get(pk=pk, owner=request.user)
             # Remove physical files
             for doc in workspace.documents.all():
                 if doc.file and os.path.isfile(doc.file.path):
@@ -77,15 +137,13 @@ class DocumentUploadView(APIView):
         if not uploaded_file:
             return Response({"error": "No file detected."}, status=status.HTTP_400_BAD_REQUEST)
 
-        workspace = None
-        if workspace_id:
-            try:
-                workspace = Workspace.objects.get(pk=workspace_id)
-            except Workspace.DoesNotExist:
-                return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
+        workspace = owned_workspace(request, workspace_id)
+        if not workspace:
+            return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
 
         doc = Document.objects.create(
             workspace=workspace,
+            owner=request.user,
             title=uploaded_file.name,
             file=uploaded_file
         )
@@ -110,7 +168,7 @@ class DocumentUploadView(APIView):
 class DocumentDeleteView(APIView):
     def delete(self, request, pk):
         try:
-            doc = Document.objects.get(pk=pk)
+            doc = Document.objects.get(pk=pk, owner=request.user, workspace__owner=request.user)
             if doc.file and os.path.isfile(doc.file.path):
                 os.remove(doc.file.path)
             doc.delete()
@@ -142,13 +200,14 @@ class AIQueryView(APIView):
         if not query:
             return Response({"error": "No query provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-        docs = Document.objects.all()
-        if workspace_id:
-            try:
-                workspace = Workspace.objects.get(pk=workspace_id)
-            except Workspace.DoesNotExist:
-                return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
-            docs = docs.filter(workspace=workspace)
+        if not workspace_id:
+            return Response({"error": "workspace_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        workspace = owned_workspace(request, workspace_id)
+        if not workspace:
+            return Response({"error": "Workspace not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        docs = Document.objects.filter(workspace=workspace, owner=request.user)
 
         if selected_doc_ids:
             try:
@@ -175,12 +234,11 @@ class AIQueryView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        if workspace_id:
-            build_document_chunks_for_workspace(workspace_id)
+        build_document_chunks_for_workspace(workspace_id)
 
         candidates = hybrid_retrieve_chunks(
             query=query,
-            workspace_id=workspace_id,
+            workspace_id=workspace.id,
             document_ids=selected_doc_ids or None,
             limit=5,
         )
@@ -200,3 +258,15 @@ class AIQueryView(APIView):
             "ai_response": ai_response,
             "sources": source_metadata,
         })
+
+
+class DocumentDownloadView(APIView):
+    def get(self, request, pk):
+        try:
+            document = Document.objects.get(pk=pk, owner=request.user, workspace__owner=request.user)
+        except Document.DoesNotExist:
+            return Response({"error": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not document.file or not os.path.isfile(document.file.path):
+            return Response({"error": "Document file not found."}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(document.file.open('rb'), as_attachment=True, filename=document.title)

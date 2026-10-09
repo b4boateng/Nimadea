@@ -33,7 +33,8 @@ import {
   X,
 } from "lucide-react";
 
-import StudyTimer from "@/components/StudyTimer";
+import WorkspaceStudyTimer from "@/components/WorkspaceStudyTimer";
+import { authFetch } from "@/lib/api";
 
 /* =========================================================
    TYPES
@@ -227,14 +228,7 @@ export default function WorkspaceChatPage({
 
   const fetchWorkspace = useCallback(async () => {
     try {
-      const res = await fetch(
-        `http://localhost:8000/api/workspaces/${workspaceId}/`,
-        {
-          headers: {
-            Accept: "application/json",
-          },
-        }
-      );
+      const res = await authFetch(`/api/workspaces/${workspaceId}/`);
 
       const contentType =
         res.headers.get("content-type");
@@ -392,8 +386,8 @@ export default function WorkspaceChatPage({
     setUploading(true);
 
     try {
-      const res = await fetch(
-        "http://localhost:8000/api/upload/",
+      const res = await authFetch(
+        "/api/upload/",
         {
           method: "POST",
           body: formData,
@@ -448,8 +442,8 @@ export default function WorkspaceChatPage({
     }
 
     try {
-      const res = await fetch(
-        `http://localhost:8000/api/documents/${documentId}/`,
+      const res = await authFetch(
+        `/api/documents/${documentId}/`,
         {
           method: "DELETE",
         }
@@ -533,8 +527,8 @@ export default function WorkspaceChatPage({
     setIsTyping(true);
 
     try {
-      const res = await fetch(
-        "http://localhost:8000/api/ai-query/",
+      const res = await authFetch(
+        "/api/ai-query/",
         {
           method: "POST",
 
@@ -1008,7 +1002,7 @@ export default function WorkspaceChatPage({
 
           <div className="flex items-center gap-3 shrink-0">
 
-            <StudyTimer
+            <WorkspaceStudyTimer
               workspaceId={workspaceId}
               onHoursLogged={
                 fetchWorkspace

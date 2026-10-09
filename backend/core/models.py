@@ -1,7 +1,15 @@
 from django.db import models
+from django.contrib.auth.models import User
 
 
 class Workspace(models.Model):
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='workspaces',
+        null=True,
+        blank=True,
+    )
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, null=True)
     target_hours = models.PositiveIntegerField(default=10)
@@ -10,6 +18,16 @@ class Workspace(models.Model):
 
     def __str__(self):
         return self.name
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    display_name = models.CharField(max_length=255, blank=True)
+
+
+class UserSettings(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='settings')
+    timezone = models.CharField(max_length=64, default='UTC')
+    email_notifications = models.BooleanField(default=True)
 
 
 class Document(models.Model):
@@ -27,6 +45,14 @@ class Document(models.Model):
 
     def __str__(self):
         return self.title
+
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='documents',
+        null=True,
+        blank=True,
+    )
 
 
 class DocumentChunk(models.Model):

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { authFetch } from "@/lib/api";
 import {
   FolderPlus,
   Trash2,
@@ -43,11 +44,7 @@ export default function WorkspacesDashboard() {
 
   const fetchWorkspaces = useCallback(async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/workspaces/", {
-        headers: {
-          "Accept": "application/json", // Strictly demand JSON
-        },
-      });
+      const res = await authFetch("/api/workspaces/");
       
       const contentType = res.headers.get("content-type");
       if (res.ok && contentType && contentType.includes("application/json")) {
@@ -76,7 +73,7 @@ export default function WorkspacesDashboard() {
     if (!newName.trim()) return;
 
     try {
-      const res = await fetch("http://localhost:8000/api/workspaces/", {
+      const res = await authFetch("/api/workspaces/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -111,7 +108,7 @@ export default function WorkspacesDashboard() {
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/api/workspaces/${id}/`, {
+      const res = await authFetch(`/api/workspaces/${id}/`, {
         method: "DELETE",
       });
 

@@ -1,5 +1,30 @@
 from rest_framework import serializers
-from .models import Document, Workspace
+from django.contrib.auth.models import User
+from .models import Document, UserProfile, UserSettings, Workspace
+
+
+class RegistrationSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    def create(self, validated_data):
+        user = User.objects.create_user(**validated_data)
+        UserProfile.objects.create(user=user)
+        UserSettings.objects.create(user=user)
+        return user
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['display_name']
+
+
+class SettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSettings
+        fields = ['timezone', 'email_notifications']
 
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
