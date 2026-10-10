@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authFetch } from "@/lib/api";
+import { authFetch, getAuthToken } from "@/lib/api";
 import {
   FolderPlus,
   Trash2,
@@ -25,6 +26,7 @@ type Workspace = {
 };
 
 export default function WorkspacesDashboard() {
+  const router = useRouter();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -63,10 +65,14 @@ export default function WorkspacesDashboard() {
   }, [showToast]);
 
   useEffect(() => {
+    if (!getAuthToken()) {
+      router.replace("/auth");
+      return;
+    }
     // The request updates state after the external fetch resolves.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchWorkspaces();
-  }, [fetchWorkspaces]);
+  }, [fetchWorkspaces, router]);
 
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();

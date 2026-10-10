@@ -233,3 +233,26 @@ class AuthenticationAuthorizationTests(TestCase):
 
         self.assertEqual(foreign_workspace.status_code, 404)
         self.assertEqual(foreign_document.status_code, 400)
+
+    def test_unowned_legacy_content_remains_inaccessible(self):
+        legacy_workspace = Workspace.objects.create(name="Legacy Workspace")
+        legacy_document = Document.objects.create(
+            workspace=legacy_workspace,
+            title="Legacy Private Notes",
+            extracted_text="Legacy private material.",
+        )
+        self.client.force_authenticate(user=self.user_a)
+
+        listing = self.client.get("/api/workspaces/")
+        workspace_detail = self.client.get(f"/api/workspaces/{legacy_workspace.id}/")
+        document_download = self.client.get(f"/api/documents/{legacy_document.id}/download/")
+        rag_query = self.client.post(
+            "/api/ai-query/",
+            {"workspace_id": legacy_workspace.id, "document_ids": [legacy_document.id], "query": "private"},
+            format="json",
+        )
+
+        self.assertNotIn(legacy_workspace.id, [item["id"] for item in listing.data])
+        self.assertEqual(workspace_detail.status_code, 404)
+        self.assertEqual(document_download.status_code, 404)
+        self.assertEqual(rag_query.status_code, 404)

@@ -24,5 +24,17 @@ export function authFetch(path: string, init: RequestInit = {}): Promise<Respons
   headers.set("Accept", "application/json");
   if (token) headers.set("Authorization", `Token ${token}`);
 
-  return fetch(apiUrl(path), { ...init, headers });
+  return fetch(apiUrl(path), { ...init, headers }).then((response) => {
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/auth"
+    ) {
+      clearAuthToken();
+      // The API helper has no access to a Next router instance.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/auth");
+    }
+    return response;
+  });
 }

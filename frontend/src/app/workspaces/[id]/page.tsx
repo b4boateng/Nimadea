@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,7 +35,7 @@ import {
 } from "lucide-react";
 
 import WorkspaceStudyTimer from "@/components/WorkspaceStudyTimer";
-import { authFetch } from "@/lib/api";
+import { authFetch, getAuthToken } from "@/lib/api";
 
 /* =========================================================
    TYPES
@@ -146,6 +147,7 @@ export default function WorkspaceChatPage({
 }) {
   const resolvedParams = use(params);
   const workspaceId = resolvedParams.id;
+  const router = useRouter();
 
   /* =======================================================
      STATE
@@ -304,9 +306,13 @@ export default function WorkspaceChatPage({
   ======================================================= */
 
   useEffect(() => {
+    if (!getAuthToken()) {
+      router.replace("/auth");
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchWorkspace();
-  }, [fetchWorkspace]);
+  }, [fetchWorkspace, router]);
 
   /* =======================================================
      AUTO-SCROLL CHAT
